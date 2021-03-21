@@ -37,10 +37,11 @@ from functools import reduce
 def get_parent_dir(n=1):
     """ returns the nth parent of the current directory """
 
-    cpath = os.path.dirname(os.path.join(os.environ['PROJECT_PATH'], "Badminton_Analysis.ipynb"))
+    cpath = os.path.dirname(os.path.join(os.environ['PROJECT_PATH'], "main.py"))
     for k in range(n):
         cpath = os.path.dirname(cpath)
     return cpath
+
 
 # CLass Yolo - base class for Yolo V3
 
@@ -70,13 +71,13 @@ class YOLO(object):
         #         self.sess = K.get_session()
 
         self.config = tf.compat.v1.ConfigProto(gpu_options=tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.8)
-                                          # device_count = {'GPU': 1}
-                                          )
+                                               # device_count = {'GPU': 1}
+                                               )
         self.config.gpu_options.allow_growth = True
         self.sess = tf.compat.v1.Session(config=self.config)
         tf.compat.v1.keras.backend.set_session(self.sess)
 
-        #self.sess = tf.compat.v1.keras.backend.get_session()
+        # self.sess = tf.compat.v1.keras.backend.get_session()
         tf.compat.v1.disable_eager_execution()
         self.boxes, self.scores, self.classes = self.generate()
 
@@ -167,9 +168,8 @@ class YOLO(object):
         )
         return boxes, scores, classes
 
-    def detect_image(self, image, show_stats=True):
+    def detect_image(self, image, frame_nb, show_stats=True, Video_on=False):
         start = timer()
-
         if self.model_image_size != (None, None):
             assert self.model_image_size[0] % 32 == 0, "Multiples of 32 required"
             assert self.model_image_size[1] % 32 == 0, "Multiples of 32 required"
@@ -200,22 +200,25 @@ class YOLO(object):
         if show_stats:
             print("Found {} boxes for {}".format(len(out_boxes), "img"))
         out_prediction = []
-        keras_path = os.path.join(get_parent_dir(0), "YoloV3", "keras_yolo3")
-        font_path = os.path.join(keras_path, "font/FiraMono-Medium.otf")
-        # print("font",font_path)
-        font = ImageFont.truetype(
-            font=font_path, size=np.floor(3e-2 * image.size[1] + 0.5).astype("int32")
-        )
-        thickness = (image.size[0] + image.size[1]) // 300
+        if Video_on:
+            keras_path = os.path.join(get_parent_dir(0), "YoloV3", "keras_yolo3")
+            font_path = os.path.join(keras_path, "font/FiraMono-Medium.otf")
+            # print("font",font_path)
+            font = ImageFont.truetype(
+                font=font_path, size=np.floor(3e-2 * image.size[1] + 0.5).astype("int32")
+            )
+            thickness = (image.size[0] + image.size[1]) // 300
 
         for i, c in reversed(list(enumerate(out_classes))):
             predicted_class = self.class_names[c]
             box = out_boxes[i]
             score = out_scores[i]
 
-            label = "{} {:.2f}".format(predicted_class, score)
-            draw = ImageDraw.Draw(image)
-            label_size = draw.textsize(label, font)
+            if Video_on:
+
+                label = "{} {:.2f}".format(predicted_class, score)
+                draw = ImageDraw.Draw(image)
+                label_size = draw.textsize(label, font)
 
             top, left, bottom, right = box
             top = max(0, np.floor(top + 0.5).astype("int32"))
@@ -232,24 +235,25 @@ class YOLO(object):
                 print(label, (left, top), (right, bottom))
 
             # output as xmin, ymin, xmax, ymax, class_index, confidence
-            out_prediction.append([left, top, right, bottom, c, score])
+            out_prediction.append([frame_nb, left, top, right, bottom, c, score])
 
-            if top - label_size[1] >= 0:
-                text_origin = np.array([left, top - label_size[1]])
-            else:
-                text_origin = np.array([left, bottom])
+            if Video_on:
+                if top - label_size[1] >= 0:
+                    text_origin = np.array([left, top - label_size[1]])
+                else:
+                    text_origin = np.array([left, bottom])
 
-            for i in range(thickness):
+                for i in range(thickness):
+                    draw.rectangle(
+                        [left + i, top + i, right - i, bottom - i], outline=self.colors[c]
+                    )
                 draw.rectangle(
-                    [left + i, top + i, right - i, bottom - i], outline=self.colors[c]
+                    [tuple(text_origin), tuple(text_origin + label_size)],
+                    fill=self.colors[c],
                 )
-            draw.rectangle(
-                [tuple(text_origin), tuple(text_origin + label_size)],
-                fill=self.colors[c],
-            )
 
-            draw.text(text_origin, label, fill=(0, 0, 0), font=font)
-            del draw
+                draw.text(text_origin, label, fill=(0, 0, 0), font=font)
+                del draw
 
         end = timer()
         if show_stats:
@@ -260,10 +264,12 @@ class YOLO(object):
         self.sess.close()
 
 
-def detect_video(yolo, video_path, output_path=""):
+def detect_video(yolo, video_path, out_df, output_path="", Video_on=False):
     vid = cv2.VideoCapture(video_path)
+
     if not vid.isOpened():
         raise IOError("Couldn't open webcam or video")
+
     video_FourCC = cv2.VideoWriter_fourcc(*"mp4v")  # int(vid.get(cv2.CAP_PROP_FOURCC))
     video_fps = vid.get(cv2.CAP_PROP_FPS)
     video_size = (
@@ -278,11 +284,14 @@ def detect_video(yolo, video_path, output_path=""):
             )
         )
         # print("!!! TYPE:", type(output_path), type(video_FourCC), type(video_fps), type(video_size))
-        out = cv2.VideoWriter(output_path, video_FourCC, video_fps, video_size)
+        if Video_on:
+            out = cv2.VideoWriter(output_path, video_FourCC, video_fps, video_size)
     accum_time = 0
     curr_fps = 0
     fps = "FPS: ??"
     prev_time = timer()
+    frame_nb = 1
+    index = 0
     while vid.isOpened():
         return_value, frame = vid.read()
         if not return_value:
@@ -290,31 +299,42 @@ def detect_video(yolo, video_path, output_path=""):
         # opencv images are BGR, translate to RGB
         frame = frame[:, :, ::-1]
         image = Image.fromarray(frame)
-        out_pred, image = yolo.detect_image(image, show_stats=False)
-        result = np.asarray(image)
-        curr_time = timer()
-        exec_time = curr_time - prev_time
-        prev_time = curr_time
-        accum_time = accum_time + exec_time
-        curr_fps = curr_fps + 1
-        if accum_time > 1:
-            accum_time = accum_time - 1
-            fps = "FPS: " + str(curr_fps)
-            curr_fps = 0
-        cv2.putText(
-            result,
-            text=fps,
-            org=(3, 15),
-            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-            fontScale=0.50,
-            color=(255, 0, 0),
-            thickness=2,
-        )
-        if isOutput:
-            out.write(result[:, :, ::-1])
+        out_pred, image = yolo.detect_image(image, frame_nb, show_stats=False, Video_on=True)
+        frame_nb += 1
+        for i in out_pred:
+            out_df.loc[index] = i
+            index += 1
+        if Video_on:
+            result = np.asarray(image)
+            curr_time = timer()
+            exec_time = curr_time - prev_time
+            prev_time = curr_time
+            accum_time = accum_time + exec_time
+            curr_fps = curr_fps + 1
+            if accum_time > 1:
+                accum_time = accum_time - 1
+                fps = "FPS: " + str(curr_fps)
+                curr_fps = 0
+            cv2.putText(
+                result,
+                text=fps,
+                org=(3, 15),
+                fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                fontScale=0.50,
+                color=(255, 0, 0),
+                thickness=2,
+            )
 
-    vid.release()
-    out.release()
+            if isOutput:
+                out.write(result[:, :, ::-1])
+
+    if Video_on:
+        vid.release()
+        out.release()
+        return out_df
+
+    else:
+        return out_df
 
 
 ##Yolo class ends
@@ -571,10 +591,10 @@ def yolo_eval(
 
 # Utility functions
 def compose(*funcs):
-    #Compose arbitrarily many functions, evaluated left to right.
+    # Compose arbitrarily many functions, evaluated left to right.
 
-    #Reference: https://mathieularose.com/function-composition-in-python/
-    
+    # Reference: https://mathieularose.com/function-composition-in-python/
+
     # return lambda x: reduce(lambda v, f: f(v), funcs, x)
     if funcs:
         return reduce(lambda f, g: lambda *a, **kw: g(f(*a, **kw)), funcs)
@@ -583,7 +603,7 @@ def compose(*funcs):
 
 
 def letterbox_image(image, size):
-    #resize image with unchanged aspect ratio using padding
+    # resize image with unchanged aspect ratio using padding
     iw, ih = image.size
     w, h = size
     scale = min(w / iw, h / ih)
