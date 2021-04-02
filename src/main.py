@@ -1,10 +1,17 @@
 import os
 import sys
 import pandas as pd
+import json
 
 from timeit import default_timer as timer
 
 import yolo as y
+import glob
+
+from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
+from datetime import datetime
+
+import pandas as pd
 
 
 # To change the initial path here before executing
@@ -16,7 +23,7 @@ def get_parent_dir(n=1):
         cpath = os.path.dirname(cpath)
     return cpath
 
-def create_model(train_weight_final,anchors_path,yolo_classname, vpath):
+def create_model(train_weight_final,anchors_path,yolo_classname, vpath, timecode):
 
     score = 0.25
     num_gpu = 1
@@ -33,6 +40,7 @@ def create_model(train_weight_final,anchors_path,yolo_classname, vpath):
 
     out_df = pd.DataFrame(
         columns=[
+            "cut_nb",
             "frame_ID",
             "xmin",
             "ymin",
@@ -42,26 +50,47 @@ def create_model(train_weight_final,anchors_path,yolo_classname, vpath):
             "confidence",
         ]
     )
+    df = out_df
+    onoff = False
+    cut_nb = 0
+    index = 0
+    for i in timecode:
+        if onoff:
+            end = i['time']
+            end = end['secondes']
+            onoff = False
+            cut_nb += 1
+            videotoclips(vpath, start, end, cut_nb)
+            # labels to draw on images
+            class_file = open(yolo_classname, "r")
 
-    # labels to draw on images
-    class_file = open(yolo_classname, "r")
+            input_labels = [line.rstrip("\n") for line in class_file.readlines()]
+            print("Found {} input labels: {} ...".format(len(input_labels), input_labels))
 
-    input_labels = [line.rstrip("\n") for line in class_file.readlines()]
-    print("Found {} input labels: {} ...".format(len(input_labels), input_labels))
+            df, index = y.detect_video(yolo, "res/img/video_" + str(cut_nb) + ".mp4", df, cut_nb, index,
+                                      #output_path="res/img/video_detect" + str(cut_nb) + ".mp4",
+                                        Video_on=False)
 
-    df = y.detect_video(yolo, vpath, out_df,
-                        #output_path="testPA8_detect2.mp4",
-                        Video_on=False)
+            os.remove("res/img/video_" + str(cut_nb) + ".mp4")
+
+        if i['category'] == 'CAMERA':
+            if i['description'] == 'BAD_camera vert':
+                start = i['time']
+                start = start['secondes']
+                onoff = True
 
     yolo.close_session()
-
     return df
-    #df.to_csv("data2.csv", index=False)
 
-def videotoclips(tab):
-    clips = []
+def videotoclips(vpath, start, end, cut_nb):
 
-    return clips
+    start = float(start)
+    end = float(end)
+    cut = ffmpeg_extract_subclip(vpath, start, end, targetname="res/img/video_" + str(cut_nb) + ".mp4")
+    return cut
+
+def transform_df():
+    pass
 
 def main():
     os.environ['PROJECT_PATH'] = "."
@@ -80,10 +109,18 @@ def main():
     train_weight_final = os.path.join(yolo_log_dir, "trained_weights_final.h5")
 
     ressources = os.path.join(get_parent_dir(0), "res")
+    text = os.path.join(ressources, "txt")
+    jsoninfo = os.path.join(text, "games1.json")
     video = os.path.join(ressources, "video")
-    videotest = os.path.join(video, "video.mp4")
+    videotest = os.path.join(video, "Video1.mp4")
 
-    df = create_model(train_weight_final, anchors_path, YOLO_classname, videotest)
+    with open(jsoninfo) as json_data:
+        data_dict = json.load(json_data)
+        match = data_dict['match']
+        timecode = match['actions']
+
+    df = create_model(train_weight_final, anchors_path, YOLO_classname, videotest, timecode)
+    df.to_csv("data_cut.csv", index=False)
 
 
 if __name__ == '__main__':

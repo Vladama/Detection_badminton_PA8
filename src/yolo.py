@@ -168,7 +168,7 @@ class YOLO(object):
         )
         return boxes, scores, classes
 
-    def detect_image(self, image, frame_nb, show_stats=True, Video_on=False):
+    def detect_image(self, image, frame_nb, cut_nb, show_stats=True, Video_on=False):
         start = timer()
         if self.model_image_size != (None, None):
             assert self.model_image_size[0] % 32 == 0, "Multiples of 32 required"
@@ -235,7 +235,7 @@ class YOLO(object):
                 print(label, (left, top), (right, bottom))
 
             # output as xmin, ymin, xmax, ymax, class_index, confidence
-            out_prediction.append([frame_nb, left, top, right, bottom, c, score])
+            out_prediction.append([cut_nb, frame_nb, left, top, right, bottom, c, score])
 
             if Video_on:
                 if top - label_size[1] >= 0:
@@ -264,7 +264,7 @@ class YOLO(object):
         self.sess.close()
 
 
-def detect_video(yolo, video_path, out_df, output_path="", Video_on=False):
+def detect_video(yolo, video_path, out_df, cut_nb, index, output_path="", Video_on=False):
     vid = cv2.VideoCapture(video_path)
 
     if not vid.isOpened():
@@ -291,7 +291,6 @@ def detect_video(yolo, video_path, out_df, output_path="", Video_on=False):
     fps = "FPS: ??"
     prev_time = timer()
     frame_nb = 1
-    index = 0
     while vid.isOpened():
         return_value, frame = vid.read()
         if not return_value:
@@ -299,7 +298,7 @@ def detect_video(yolo, video_path, out_df, output_path="", Video_on=False):
         # opencv images are BGR, translate to RGB
         frame = frame[:, :, ::-1]
         image = Image.fromarray(frame)
-        out_pred, image = yolo.detect_image(image, frame_nb, show_stats=False, Video_on=True)
+        out_pred, image = yolo.detect_image(image, frame_nb, cut_nb, show_stats=False, Video_on=True)
         frame_nb += 1
         for i in out_pred:
             out_df.loc[index] = i
@@ -331,10 +330,10 @@ def detect_video(yolo, video_path, out_df, output_path="", Video_on=False):
     if Video_on:
         vid.release()
         out.release()
-        return out_df
+        return out_df, index
 
     else:
-        return out_df
+        return out_df, index
 
 
 ##Yolo class ends
