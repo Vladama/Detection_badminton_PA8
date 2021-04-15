@@ -1,16 +1,8 @@
 import os
 import sys
-import pandas as pd
 import json
-
-from timeit import default_timer as timer
-
 import yolo as y
-import glob
-
 from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
-from datetime import datetime
-
 import pandas as pd
 
 
@@ -25,6 +17,7 @@ def get_parent_dir(n=1):
 
 def create_model(train_weight_final,anchors_path,yolo_classname, vpath, timecode):
 
+    #create the model
     score = 0.25
     num_gpu = 1
     yolo = y.YOLO(
@@ -38,7 +31,8 @@ def create_model(train_weight_final,anchors_path,yolo_classname, vpath, timecode
         }
     )
 
-    out_df = pd.DataFrame(
+    # create the dataframe
+    df = pd.DataFrame(
         columns=[
             "cut_nb",
             "frame_ID",
@@ -50,10 +44,13 @@ def create_model(train_weight_final,anchors_path,yolo_classname, vpath, timecode
             "confidence",
         ]
     )
-    df = out_df
+
     onoff = False
     cut_nb = 0
     index = 0
+
+    # brut force en fonction du json des times codes
+
     for i in timecode:
         if onoff:
             end = i['time']
@@ -67,7 +64,7 @@ def create_model(train_weight_final,anchors_path,yolo_classname, vpath, timecode
             input_labels = [line.rstrip("\n") for line in class_file.readlines()]
             print("Found {} input labels: {} ...".format(len(input_labels), input_labels))
 
-            df, index = y.detect_video(yolo, "res/img/video_" + str(cut_nb) + ".mp4", df, cut_nb, index,
+            df, index, width, height = y.detect_video(yolo, "res/img/video_" + str(cut_nb) + ".mp4", df, cut_nb, index,
                                       #output_path="res/img/video_detect" + str(cut_nb) + ".mp4",
                                         Video_on=False)
 
@@ -80,7 +77,12 @@ def create_model(train_weight_final,anchors_path,yolo_classname, vpath, timecode
                 onoff = True
 
     yolo.close_session()
+
+    df = transform_df(df, width, height)
+
     return df
+
+# Function that create clips of the initial video based on timecode given in back
 
 def videotoclips(vpath, start, end, cut_nb):
 
@@ -89,13 +91,92 @@ def videotoclips(vpath, start, end, cut_nb):
     cut = ffmpeg_extract_subclip(vpath, start, end, targetname="res/img/video_" + str(cut_nb) + ".mp4")
     return cut
 
-def transform_df():
-    pass
+
+#Function that process the dataset correctly and call over function below
+
+def transform_df(df, width, height):
+
+    df = df[df.label != 2]
+
+    df = out_duplicate(df)
+
+    df = out_proportion(df, width, height)
+
+    df['Xposition'] = (df['xmin'] + df['xmax']) // 2
+    df['Yposition'] = (df['ymin'] + (df['ymax'] - df['ymin']) * (90/100))
+
+    my_columns = ['cut_nb', 'frame_ID', 'xmin', 'xmax', 'Xposition', 'ymin', 'ymax', 'Yposition', 'label', 'confidence']
+    df = df[my_columns]
+
+    return df
+
+
+# Function that delete the duplicate
+
+def out_duplicate(df):
+    
+    for i in range(len(df)):
+
+        if i == (df.shape[0] - 1):
+            break
+
+        if df['frame_ID'][i] == df['frame_ID'][i + 1]:
+
+            if (df['label'][i] == df['label'][i + 1]):
+
+                if (df['label'][i] == 0):
+
+                    if (df['ymax'][i] > df['ymax'][i + 1]):
+
+                        df.drop(labels=i + 1, axis=0, inplace=True)
+                        df = df.reset_index(drop=True)
+
+                    else:
+                        df.drop(labels=i, axis=0, inplace=True)
+                        df = df.reset_index(drop=True)
+
+                else:
+
+                    if (df['ymax'][i] < df['ymax'][i + 1]):
+
+                        df.drop(labels=i + 1, axis=0, inplace=True)
+                        df = df.reset_index(drop=True)
+
+                    else:
+
+                        df.drop(labels=i, axis=0, inplace=True)
+                        df = df.reset_index(drop=True)
+
+    return df
+
+
+# Function that clear the box that are out of proportion
+
+def out_proportion(df, width, height):
+
+    width = width * (25/100)
+    height = height * (60/100)
+
+    for i in range(len(df)):
+
+        if i == (df.shape[0] - 1):
+            break
+
+        x = df['xmax'][i] - df['xmin'][i]
+        y = df['ymax'][i] - df['ymin'][i]
+
+        if (x > width) or (y > height):
+            df.drop(labels=i, axis=0, inplace=True)
+
+    df = df.reset_index(drop=True)
+    
+    return df
+
 
 def main():
-    os.environ['PROJECT_PATH'] = "."
+    os.environ['PROJECT_PATH']='.'
 
-    src_path = os.path.join(get_parent_dir(0))
+    src_path = os.path.join(get_parent_dir(0))# path src
     sys.path.append(src_path)
 
     Yolo_Model_Folder = os.path.join(get_parent_dir(0), "YoloV3")
@@ -110,17 +191,17 @@ def main():
 
     ressources = os.path.join(get_parent_dir(0), "res")
     text = os.path.join(ressources, "txt")
-    jsoninfo = os.path.join(text, "games1.json")
+    jsoninfo = os.path.join(text, "games1.json") # json de cut (camera on/off)
     video = os.path.join(ressources, "video")
-    videotest = os.path.join(video, "Video1.mp4")
+    videotest = os.path.join(video, "Video1.mp4") # vidéo de référence
 
-    with open(jsoninfo) as json_data:
+    with open(jsoninfo) as json_data: ### Utile que si tu me renvoie le json complet et pas directement la partie action
         data_dict = json.load(json_data)
         match = data_dict['match']
-        timecode = match['actions']
+        timecode = match['actions'] ### jusqu'à la
 
-    df = create_model(train_weight_final, anchors_path, YOLO_classname, videotest, timecode)
-    df.to_csv("data_cut.csv", index=False)
+    df = create_model(train_weight_final, anchors_path, YOLO_classname, videotest, timecode) # function that run all the process
+    df.to_csv("data_final.csv", index=False) # return csv
 
 
 if __name__ == '__main__':

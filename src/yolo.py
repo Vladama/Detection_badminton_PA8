@@ -203,7 +203,7 @@ class YOLO(object):
         if Video_on:
             keras_path = os.path.join(get_parent_dir(0), "YoloV3", "keras_yolo3")
             font_path = os.path.join(keras_path, "font/FiraMono-Medium.otf")
-            # print("font",font_path)
+
             font = ImageFont.truetype(
                 font=font_path, size=np.floor(3e-2 * image.size[1] + 0.5).astype("int32")
             )
@@ -272,9 +272,11 @@ def detect_video(yolo, video_path, out_df, cut_nb, index, output_path="", Video_
 
     video_FourCC = cv2.VideoWriter_fourcc(*"mp4v")  # int(vid.get(cv2.CAP_PROP_FOURCC))
     video_fps = vid.get(cv2.CAP_PROP_FPS)
+    width = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
     video_size = (
-        int(vid.get(cv2.CAP_PROP_FRAME_WIDTH)),
-        int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        width,
+        height,
     )
     isOutput = True if output_path != "" else False
     if isOutput:
@@ -283,7 +285,7 @@ def detect_video(yolo, video_path, out_df, cut_nb, index, output_path="", Video_
                 os.path.basename(video_path), video_size, video_fps
             )
         )
-        # print("!!! TYPE:", type(output_path), type(video_FourCC), type(video_fps), type(video_size))
+
         if Video_on:
             out = cv2.VideoWriter(output_path, video_FourCC, video_fps, video_size)
     accum_time = 0
@@ -330,10 +332,10 @@ def detect_video(yolo, video_path, out_df, cut_nb, index, output_path="", Video_
     if Video_on:
         vid.release()
         out.release()
-        return out_df, index
+        return out_df, index, width, height
 
     else:
-        return out_df, index
+        return out_df, index, width, height
 
 
 ##Yolo class ends
